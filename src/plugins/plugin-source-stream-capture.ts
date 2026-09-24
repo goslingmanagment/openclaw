@@ -60,8 +60,15 @@ export function capturePluginSourceFile(params: {
       drainFileInChunks(
         opened.fd,
         (chunk) => {
+          let offset = 0;
+          while (offset < chunk.length) {
+            const bytesWritten = fs.writeSync(targetFd, chunk, offset, chunk.length - offset);
+            if (bytesWritten === 0) {
+              throw new Error("Plugin source capture write made no progress");
+            }
+            offset += bytesWritten;
+          }
           contentHash.update(chunk);
-          fs.writeSync(targetFd, chunk);
         },
         length,
       );
