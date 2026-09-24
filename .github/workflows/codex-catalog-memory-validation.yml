@@ -1,0 +1,41 @@
+name: Codex catalog memory validation
+
+on:
+  push:
+    branches: [codex/validate-catalog-157459]
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+          run_install: false
+      - name: Run exact-head suites and capture identity proof
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/probe-home" "$RUNNER_TEMP/probe-state" "$RUNNER_TEMP/probe-codex"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/probe-home" CI=true \
+            TMPDIR="$RUNNER_TEMP" OPENCLAW_STATE_DIR="$RUNNER_TEMP/probe-state" \
+            OPENCLAW_CONFIG_PATH="$RUNNER_TEMP/probe-state/openclaw.json" \
+            CODEX_HOME="$RUNNER_TEMP/probe-codex" \
+            bash .github/diagnostics/catalog-validation.sh
+      - name: Upload synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-validation
+          path: /tmp/openclaw-catalog-validation
+          if-no-files-found: warn
