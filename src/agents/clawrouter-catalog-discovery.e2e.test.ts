@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { captureClawInstallSchemaVersionFacts } from "../claws/provenance-runtime-read.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -29,7 +29,7 @@ import { prepareWorkspaceBuildGroup } from "./prepared-model-runtime.facts.js";
 
 describe("ClawRouter cold prepared catalog", () => {
   let state: OpenClawTestState;
-  let server: Awaited<ReturnType<typeof reserveTestPortListener>> | undefined;
+  let server: Awaited<ReturnType<typeof reserveTestPortListener<Server>>> | undefined;
   let pool: WorkerTaskPool<PreparedModelCatalogWorkerTask, PreparedModelWorkerResult> | undefined;
 
   afterEach(async () => {
