@@ -21,11 +21,11 @@ import {
 const MULTI_CHUNK_BYTES = 3 * 1024 * 1024 + 777;
 
 function multiChunkFixture(): Buffer {
-  // A fixed, non-repeating pattern (not zero-filled) so a truncated or reordered
-  // stream would change the hash instead of accidentally matching.
+  // Include higher index bytes so successive 1 MiB chunks differ and reordering
+  // or repeating a chunk changes the hash instead of accidentally matching.
   const content = Buffer.allocUnsafe(MULTI_CHUNK_BYTES);
   for (let index = 0; index < content.length; index++) {
-    content[index] = (index * 2654435761) & 0xff;
+    content[index] = (index ^ (index >>> 8) ^ (index >>> 16)) & 0xff;
   }
   return content;
 }
@@ -148,6 +148,87 @@ describe("streaming plugin source capture (issue #155728)", () => {
     expect(result.contentHash).toBe(createHash("sha256").update(content).digest("hex"));
     expect(fs.readFileSync(target)).toEqual(content);
   });
+
+  it("writes each chunk completely after short writes", () => {
+    const boundary = temp.make("plugin-stream-short-write-source-");
+    const source = path.join(boundary, "asset.bin");
+    const content = multiChunkFixture();
+    fs.writeFileSync(source, content);
+    const target = path.join(temp.make("plugin-stream-short-write-target-"), "asset.bin");
+    const realWriteSync = fs.writeSync;
+    // Exercise the buffer overload with real short writes, including within the final chunk.
+    vi.spyOn(fs, "writeSync").mockImplementation(((
+      fd: number,
+      buffer: NodeJS.ArrayBufferView,
+      offset: number = 0,
+      length: number = buffer.byteLength - offset,
+      position: number | null = null,
+    ) =>
+      realWriteSync(fd, buffer, offset, Math.ceil(length / 2), position)) as typeof fs.writeSync);
+
+    const result = capturePluginSourceFile({
+      source,
+      boundary,
+      target: { path: target, mode: 0o700 },
+    });
+
+    const captured = fs.readFileSync(target);
+    expect(captured.length).toBe(content.length);
+    expect(captured.equals(content)).toBe(true);
+    expect(result.length).toBe(content.length);
+    expect(result.contentHash).toBe(createHash("sha256").update(content).digest("hex"));
+    expect(result.contentHash).toBe(createHash("sha256").update(captured).digest("hex"));
+    const digest = createHash("sha256");
+    capturePluginSourceDigest(target, digest, result.length);
+    expect(digest.digest("hex")).toBe(expectedWholeBufferDigestHex(content));
+    if (process.platform !== "win32") {
+      expect(fs.statSync(target).mode & 0o777).toBe(0o700 & ~process.umask());
+    }
+  });
+
+  it.each(["zero progress", "ENOSPC"])(
+    "fails and closes both descriptors on %s after a short write",
+    (failure) => {
+      const boundary = temp.make("plugin-stream-write-error-source-");
+      const source = path.join(boundary, "asset.bin");
+      const content = Buffer.from("plugin source bytes that cannot be silently truncated");
+      fs.writeFileSync(source, content);
+      const target = path.join(temp.make("plugin-stream-write-error-target-"), "asset.bin");
+      const noSpaceError = Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+      const realWriteSync = fs.writeSync;
+      const writeSyncSpy = vi
+        .spyOn(fs, "writeSync")
+        .mockImplementationOnce(((fd: number, buffer: NodeJS.ArrayBufferView, offset: number = 0) =>
+          realWriteSync(fd, buffer, offset, 17)) as typeof fs.writeSync)
+        .mockImplementationOnce(() => {
+          if (failure === "ENOSPC") {
+            throw noSpaceError;
+          }
+          return 0;
+        })
+        .mockImplementation(() => {
+          throw new Error("Unexpected retry after write failure");
+        });
+      const readSyncSpy = vi.spyOn(fs, "readSync");
+
+      expect(() =>
+        capturePluginSourceFile({ source, boundary, target: { path: target, mode: 0o600 } }),
+      ).toThrow(
+        failure === "ENOSPC"
+          ? expect.objectContaining({ code: "ENOSPC", message: noSpaceError.message })
+          : "Plugin source capture write made no progress",
+      );
+
+      expect(writeSyncSpy).toHaveBeenCalledTimes(2);
+      const targetFd = writeSyncSpy.mock.calls[0]![0];
+      const sourceFd = readSyncSpy.mock.calls[0]![0];
+      for (const fd of [sourceFd, targetFd]) {
+        expect(() => fs.fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+      }
+      expect(fs.readFileSync(target)).toEqual(content.subarray(0, 17));
+      expect(fs.readFileSync(source)).toEqual(content);
+    },
+  );
 
   it("feeds an artifact digest without a whole-buffer read, for a fresh or re-aliased entry", () => {
     const boundary = temp.make("plugin-stream-alias-source-");
