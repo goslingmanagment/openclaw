@@ -69,6 +69,7 @@ port.on("message", (message: { input: CatalogInspectionTask }) => {
 });
 const post = port.postMessage.bind(port);
 port.postMessage = (message: { status: string; value?: object }, transferList) => {
+  let response = message;
   if (message.status === "ok" && message.value) {
     const { input, sourceConfigForSecrets } = task.value;
     const runtimeFacts = getConfigResolutionFacts(input.config);
@@ -113,12 +114,12 @@ port.postMessage = (message: { status: string; value?: object }, transferList) =
           }
         : {}),
     };
-    message = { ...message, value: { ...message.value, inspection } };
+    response = { ...message, value: { ...message.value, inspection } };
   }
   if (Array.isArray(transferList)) {
-    post(message, transferList);
+    post(response, transferList);
   } else {
-    post(message, transferList);
+    post(response, transferList);
   }
 };
 await import("../prepared-model-catalog.worker.js");

@@ -383,9 +383,9 @@ it("keeps observed untagged models without restoring API rows deleted during nat
     contextWindow: 48_000,
     params: { accountModel: "account-route-model" },
   };
-  const entered = createDeferredCore<void>();
-  const release = createDeferredCore<void>();
-  let renewed = createDeferredCore<void>();
+  const entered = createDeferredCore();
+  const release = createDeferredCore();
+  let renewed = createDeferredCore();
   loadB.mockImplementationOnce(async () => {
     entered.resolve();
     await release.promise;
@@ -446,7 +446,7 @@ it("keeps observed untagged models without restoring API rows deleted during nat
       entries: [latestApi],
       routeVariants: [latestApi],
     });
-    renewed = createDeferredCore<void>();
+    renewed = createDeferredCore();
     resolvePreparedModelRuntimeOwnerBySnapshot(owner)!.catalogInventory!.providers.get(
       b.provider,
     )!.expiresAt = 0;

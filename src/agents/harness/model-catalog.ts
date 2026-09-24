@@ -262,7 +262,11 @@ export async function augmentModelCatalogWithAgentHarness(params: {
       nativeProviderOutcomes !== result.nativeProviderOutcomes ||
       nativeHostRows !== result.nativeHostRows
     ) {
-      result = { ...result, nativeProviderOutcomes, nativeHostRows };
+      if (result === params.snapshot) {
+        result = { ...params.snapshot };
+      }
+      result.nativeProviderOutcomes = nativeProviderOutcomes;
+      result.nativeHostRows = nativeHostRows;
     }
     completedRows.push(...scopedRows);
     discovered = true;

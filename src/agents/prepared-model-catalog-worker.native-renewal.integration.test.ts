@@ -50,7 +50,9 @@ it("admits cold native discovery during expired fleet provider renewal and prese
   const publications: Promise<unknown>[] = [];
   const waiters = new Set<() => void>();
   const unsubscribe = registerPreparedModelRuntimePublicationListener(() => {
-    for (const check of waiters) check();
+    for (const check of waiters) {
+      check();
+    }
   });
   const taskChannel = channel("openclaw.worker.task");
   const recordTask = (message: unknown) => {
@@ -213,6 +215,12 @@ module.exports = { id: ${JSON.stringify(PROVIDER_ID)}, register(api) {
     );
     snapshots = fixture.snapshots;
     await Promise.all(snapshots.map((snapshot) => loadCompletedFullCatalog(snapshot)));
+    expect(requests).toHaveLength(2);
+    for (const snapshot of snapshots) {
+      expect(snapshot.readFullModelCatalog?.()?.entries).toContainEqual(
+        expect.objectContaining({ provider: PROVIDER_ID, id: "provider-0" }),
+      );
+    }
     const preparedRegistrations = fs.readFileSync(registrations, "utf8");
     for (revision = 1; revision <= 3; revision++) {
       const nativeProvider = revision === 3 ? UNSEEN_NATIVE_PROVIDER : PROVIDER_ID;
@@ -225,6 +233,8 @@ module.exports = { id: ${JSON.stringify(PROVIDER_ID)}, register(api) {
       nativeHeld = revision === 2 ? createDeferred() : undefined;
       const publication = waitForCatalogs(revision);
       publications.push(publication);
+      // The admission barrier can fail first; the original publication is still awaited below.
+      void publication.catch(() => undefined);
       // Resolve the published owner before explicit inventory demand, as Gateway requests do.
       await Promise.all(
         snapshots.map(async (snapshot) => {

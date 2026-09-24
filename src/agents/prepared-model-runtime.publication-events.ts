@@ -88,7 +88,7 @@ export function createCatalogAttemptReporter(
     (pendingProviders.provider?.length ?? 0) + (pendingProviders.native?.length ?? 0);
   const failed = (
     error: unknown,
-    providers: readonly string[] | undefined = undefined,
+    providers?: readonly string[],
     kind: PreparedModelCatalogAcquisitionKind = "provider",
   ) => {
     if (isCurrent() && !(error instanceof PreparedModelRuntimePublicationSupersededError)) {

@@ -344,7 +344,7 @@ export function fingerprintPreparedModelCatalogGeneration(
     authStore: params.authStore,
     providerIds: params.providerIds,
     catalogFacts: params.catalogFacts,
-    preferBuiltPluginArtifacts: params.preferBuiltPluginArtifacts === true,
+    preferBuiltPluginArtifacts: params.preferBuiltPluginArtifacts,
     pluginFingerprint: fingerprintPreparedModelCatalogPlugins(params.pluginMetadataSnapshot),
   });
 }

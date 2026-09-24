@@ -142,7 +142,7 @@ export function createFullModelCatalogAccess(
         ),
     ),
   );
-  const inventory: PreparedModelCatalogInventory | undefined =
+  const retainedInventory: PreparedModelCatalogInventory | undefined =
     previousInventory && retainedProviders.size
       ? {
           ...selectPreparedModelCatalogInventory(previousInventory, (provider) =>
@@ -151,7 +151,7 @@ export function createFullModelCatalogAccess(
           nativeSource,
         }
       : undefined;
-  if (inventory) {
+  if (retainedInventory) {
     // Native presence markers and empty credentials do not identify an account.
     const identifiedNativeProviders = new Set(
       previousInventory?.nativeSource === nativeSource
@@ -164,22 +164,23 @@ export function createFullModelCatalogAccess(
     );
     const retain = (entry: ModelCatalogSnapshot["entries"][number]) =>
       !entry.nativeRuntime || identifiedNativeProviders.has(normalizeProvider(entry.provider));
-    inventory.catalog.entries = inventory.catalog.entries.filter(retain);
-    inventory.catalog.routeVariants = inventory.catalog.routeVariants.filter(retain);
+    retainedInventory.catalog.entries = retainedInventory.catalog.entries.filter(retain);
+    retainedInventory.catalog.routeVariants =
+      retainedInventory.catalog.routeVariants.filter(retain);
     const includesNativeProvider = (provider: string) =>
       identifiedNativeProviders.has(normalizeProvider(provider));
-    inventory.catalog.nativeProviderOutcomes = filterNativeModelCatalogScopes(
-      inventory.catalog.nativeProviderOutcomes,
+    retainedInventory.catalog.nativeProviderOutcomes = filterNativeModelCatalogScopes(
+      retainedInventory.catalog.nativeProviderOutcomes,
       includesNativeProvider,
     );
-    inventory.catalog.nativeHostRows = filterNativeModelCatalogScopes(
-      inventory.catalog.nativeHostRows,
+    retainedInventory.catalog.nativeHostRows = filterNativeModelCatalogScopes(
+      retainedInventory.catalog.nativeHostRows,
       includesNativeProvider,
     );
   }
   const currentAuth = prepareInitialModelCatalogAuth(params, eligibleProviders);
-  if (inventory && previousAuth) {
-    setCatalogAuth(inventory.catalog, currentAuth);
+  if (retainedInventory && previousAuth) {
+    setCatalogAuth(retainedInventory.catalog, currentAuth);
   }
   const hasNativeCatalog = params.pluginGeneration.pluginRegistry?.agentHarnesses.some(
     ({ harness }) => typeof harness.loadModelCatalog === "function",
@@ -192,7 +193,7 @@ export function createFullModelCatalogAccess(
   type Publication = CatalogCandidate & { catalog: ModelCatalogSnapshot | undefined };
   let published: Publication = {
     catalog: undefined,
-    inventory,
+    inventory: retainedInventory,
     configuredRuntimeModels: params.catalogFacts.configuredRuntimeModels,
     nativeCatalogAcquired: !hasNativeCatalog,
   };
@@ -241,9 +242,9 @@ export function createFullModelCatalogAccess(
       nativeCatalogAcquired: acquiredNative,
     };
   };
-  if (inventory) {
+  if (retainedInventory) {
     published = preparePublication(
-      inventory,
+      retainedInventory,
       published.configuredRuntimeModels,
       published.nativeCatalogAcquired,
     );
@@ -426,8 +427,8 @@ export function createFullModelCatalogAccess(
         includesProvider: providerIds
           ? (provider) => providerIds.includes(normalizeProvider(provider))
           : undefined,
-        onError: (error, failedProviders) => {
-          failures.push({ error, providers: failedProviders?.map(normalizeProvider) });
+        onError: (error, failedProviderIds) => {
+          failures.push({ error, providers: failedProviderIds?.map(normalizeProvider) });
         },
         onDiscoveryStarted: (provider) =>
           attempt.setPending([normalizeProvider(provider)], "native"),
