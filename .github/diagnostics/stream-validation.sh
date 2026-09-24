@@ -27,9 +27,9 @@ if [ "$red_status" -ne 1 ]; then
   printf 'Expected assertion failure from original implementation; got exit %s\n' "$red_status"
   exit 1
 fi
-python3 .github/diagnostics/check-short-write-red.py /tmp/openclaw-stream-validation/red.json
 /usr/bin/time -v pnpm test src/plugins/plugin-package-metadata-capture.test.ts src/plugins/plugin-generation-artifact.test.ts src/plugins/plugin-generation-artifact.ownership.test.ts --maxWorkers=1 --reporter=json --outputFile=/tmp/openclaw-stream-validation/green.json
 /usr/bin/time -v node scripts/run-oxlint.mjs --tsconfig config/tsconfig/oxlint.core.json src/plugins/plugin-source-stream-capture.ts src/plugins/plugin-package-metadata-capture.test.ts
 /usr/bin/time -v node scripts/run-tsgo-core-test-shards.mjs --changed-paths-json '["src/plugins/plugin-package-metadata-capture.test.ts"]'
 python3 .github/diagnostics/record-tested-tree.py
 cmp /tmp/openclaw-stream-validation/initial-tested-source.json /tmp/openclaw-stream-validation/tested-source.json
+python3 .github/diagnostics/check-short-write-red.py /tmp/openclaw-stream-validation/red.json

@@ -8,7 +8,7 @@ expected = {
     "fails and closes both descriptors on ENOSPC after a short write",
 }
 actual = {test["title"] for test in failed}
-if actual != expected or len(failed) != 3 or report["numFailedTestSuites"] != 1 or report["numFailedTests"] != 3:
+if actual != expected or len(failed) != 3 or len(report["testResults"]) != 1 or report["testResults"][0]["status"] != "failed" or not report["testResults"][0]["name"].endswith("/src/plugins/plugin-package-metadata-capture.test.ts") or report["numFailedTests"] != 3:
     raise SystemExit("Original implementation did not fail exactly the three short-write regressions: " + repr(actual))
 for test in failed:
     messages = "\n".join(test.get("failureMessages", []))
