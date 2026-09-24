@@ -13,10 +13,11 @@ import { drainGlobalSingletonLifecycleState } from "../shared/global-singleton.j
 import { withEnvAsync } from "../test-utils/env.js";
 import { unregisterResolvedAgentDir } from "./agent-dir-registry.js";
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "./agent-scope-config.js";
+import { MINIMAX_CLI_PROFILE_ID } from "./auth-profiles/constants.js";
 import { isPendingOAuthRefreshFence } from "./auth-profiles/oauth-refresh-marker.js";
 import { getRuntimeExternalCliProfileIds } from "./auth-profiles/runtime-external-profile-references.js";
 import { saveAuthProfileStore } from "./auth-profiles/store-runtime.js";
-import type { AuthProfileStore } from "./auth-profiles/types.js";
+import type { AuthProfileStore, RuntimeAuthProfileStore } from "./auth-profiles/types.js";
 import { preparePublishedModelCatalogOwnerIdentity } from "./prepared-model-catalog-owner.js";
 import { createPreparedModelCatalogWorker } from "./prepared-model-catalog-worker.js";
 import {
@@ -703,6 +704,72 @@ describe("prepared model catalog worker boundary", () => {
     fixture.supersede();
     await waitForWorkers({ requireCreated: true });
     expect(getPreparedModelFullCatalogAuth(fullCatalog)?.authStore).toBe(fullAuth.authStore);
+  });
+
+  it("retains refreshed CLI auth while acquiring an unrelated provider catalog", async () => {
+    const cliHome = makeTempDir("openclaw-catalog-cli-auth-home-");
+    const fixture = await createStaticSnapshot(0, { HOME: cliHome });
+    const provider = "minimax-portal";
+    saveAuthProfileStore(
+      {
+        version: 1,
+        profiles: {
+          [MINIMAX_CLI_PROFILE_ID]: {
+            type: "oauth",
+            provider,
+            access: "expired-cli-access-not-real",
+            refresh: "same-cli-login-not-real",
+            expires: 1,
+          },
+        },
+        order: { [provider]: [MINIMAX_CLI_PROFILE_ID] },
+      },
+      fixture.agentDir,
+    );
+    const cliCredentials = path.join(cliHome, ".minimax", "oauth_creds.json");
+    fs.mkdirSync(path.dirname(cliCredentials), { recursive: true });
+    fs.writeFileSync(
+      cliCredentials,
+      JSON.stringify({
+        access_token: "refreshed-cli-access-not-real",
+        refresh_token: "same-cli-login-not-real",
+        expiry_date: Date.now() + 3_600_000,
+      }),
+    );
+
+    const refreshed = await fixture.snapshot.loadFullModelCatalog!({
+      refresh: true,
+      providerIds: [provider],
+    });
+    const expected = getPreparedModelFullCatalogAuth(refreshed)!;
+    expect(expected.credentials?.[provider]).toMatchObject({
+      access: "refreshed-cli-access-not-real",
+    });
+    expect(expected.authStore.profiles[MINIMAX_CLI_PROFILE_ID]).toMatchObject({
+      access: "refreshed-cli-access-not-real",
+    });
+    const expectedStore: RuntimeAuthProfileStore = expected.authStore;
+    expect(expectedStore.runtimeLocalProfileIds).toContain(MINIMAX_CLI_PROFILE_ID);
+    expect(expectedStore.runtimeLocalOrderProviderIds).toContain(provider);
+
+    const unrelated = await fixture.snapshot.loadFullModelCatalog!({
+      refresh: true,
+      providerIds: [PROVIDER_ID],
+    });
+    expect(unrelated.entries).toContainEqual(
+      expect.objectContaining({ provider: PROVIDER_ID, id: "plugin-generation-v1" }),
+    );
+    const retained = getPreparedModelFullCatalogAuth(unrelated)!;
+    expect(retained.credentials?.[provider]).toEqual(expected.credentials?.[provider]);
+    expect(retained.authStore.profiles[MINIMAX_CLI_PROFILE_ID]).toEqual(
+      expected.authStore.profiles[MINIMAX_CLI_PROFILE_ID],
+    );
+    const retainedStore: RuntimeAuthProfileStore = retained.authStore;
+    expect(retainedStore.runtimeLocalProfileIds).toContain(MINIMAX_CLI_PROFILE_ID);
+    expect(retainedStore.runtimeLocalOrderProviderIds).toContain(provider);
+    expect(retainedStore.runtimePersistedProfileIds ?? []).not.toContain(MINIMAX_CLI_PROFILE_ID);
+    expect(retainedStore.order?.[provider]).toEqual(expectedStore.order?.[provider]);
+    expect(fixture.snapshot.isCurrent()).toBe(true);
   });
 
   it("refreshes plugin external auth without changing the prepared plugin generation", async () => {
