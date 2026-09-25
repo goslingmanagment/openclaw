@@ -3,7 +3,7 @@ set -euo pipefail
 proof_dir=/tmp/openclaw-compact-validation
 mkdir -p "$proof_dir"
 exec > >(tee "$proof_dir/run.log") 2>&1
-fixed_commit=f16e8e50fbfb24ca37ec3379e1c7aed85f033966
+fixed_commit=f280e98c6963c621d39f2d9124e4c708c9aa2362
 original_commit=052cc590865fbeaca9c44abee84a1435936aa6ea
 source_path=src/agents/embedded-agent-runner/compact.ts
 test_path=src/agents/embedded-agent-runner/compact.native-cli.test.ts
