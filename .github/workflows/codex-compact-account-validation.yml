@@ -1,0 +1,37 @@
+name: Codex compact account validation
+on:
+  push:
+    branches: [codex/validate-compact-account-157766]
+permissions:
+  contents: read
+jobs:
+  compact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - name: Verify the regression and account isolation without credentials
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/probe-home" "$RUNNER_TEMP/probe-state" "$RUNNER_TEMP/probe-codex"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/probe-home" CI=true \
+            TMPDIR="$RUNNER_TEMP" OPENCLAW_STATE_DIR="$RUNNER_TEMP/probe-state" \
+            OPENCLAW_CONFIG_PATH="$RUNNER_TEMP/probe-state/openclaw.json" \
+            CODEX_HOME="$RUNNER_TEMP/probe-codex" \
+            bash .github/diagnostics/compact-validation.sh
+      - name: Upload synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compact-account-validation
+          path: /tmp/openclaw-compact-validation
+          if-no-files-found: warn
