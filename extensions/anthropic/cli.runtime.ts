@@ -72,6 +72,8 @@ type ClaudeCliSession = {
   closed: boolean;
   // Tasks outlive inputs; false marks subagent work with no parent-stream query.
   taskOwners: Map<string, string | false>;
+  // Native tasks between their start and finish bookends, with the task that launched each.
+  runningTasks: Map<string, string | undefined>;
   // Native notification results identify task runs rather than task IDs.
   taskRuns: Map<string, string>;
 };
@@ -351,6 +353,7 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
   }
   const turn = session.currentTurn;
   let taskId: string | undefined;
+  let parentRuns = false;
   if (message.type === "system") {
     const input = turn && (!session.hasInputLifecycle || turn.inputStarted) ? turn : undefined;
     const inputUuid = input?.inputUuid ?? "";
@@ -377,6 +380,17 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
       }
     } else {
       taskId = recordTaskOwnership(session, message, inputUuid);
+      if (typeof message.task_id === "string" && message.subtype === "task_started") {
+        session.runningTasks.set(
+          message.task_id,
+          typeof message.parent_task_id === "string" ? message.parent_task_id : undefined,
+        );
+      } else if (typeof message.task_id === "string" && message.subtype === "task_notification") {
+        const parentTaskId = session.runningTasks.get(message.task_id);
+        session.runningTasks.delete(message.task_id);
+        // Native routes a subagent's task notification to that subagent while it runs.
+        parentRuns = parentTaskId !== undefined && session.runningTasks.has(parentTaskId);
+      }
     }
   }
   if (!turn) {
@@ -464,8 +478,8 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
     turn.taskNotifications.set(replayedTaskId, "replayed");
   }
   if (message.type === "system" && message.subtype === "task_notification" && taskId) {
-    if (message.status === "stopped") {
-      // Stopped work has no notification query to wait for.
+    if (message.status === "stopped" || parentRuns) {
+      // Stopped work, and work a running subagent answers, has no notification query here.
       turn.pendingBackgroundTaskIds.delete(taskId);
       turn.foregroundTaskIds.delete(taskId);
       turn.taskNotifications.delete(taskId);
@@ -552,6 +566,7 @@ function createSession(capability?: CliBackendLiveSessionCapability): ClaudeCliS
     hasInputLifecycle: false,
     closed: false,
     taskOwners: new Map(),
+    runningTasks: new Map(),
     taskRuns: new Map(),
     handle: {
       generation: randomUUID(),
