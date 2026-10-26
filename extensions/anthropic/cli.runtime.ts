@@ -13,7 +13,11 @@ import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { hasClaudeRawToolInvocation } from "./cli-output.js";
 import type { ClaudeCliSecretInput } from "./cli-process.js";
 import { prepareClaudeCliTransportArgs } from "./cli-runtime-args.js";
-import { readReplayedTaskId, recordTaskOwnership } from "./cli-runtime-tasks.js";
+import {
+  readReplayedTaskId,
+  recordRunningDescendants,
+  recordTaskOwnership,
+} from "./cli-runtime-tasks.js";
 import { createClaudeCliTransport } from "./cli-transport.js";
 import { createClaudeCliUserInputAuthorizer } from "./cli-user-input.js";
 
@@ -72,10 +76,10 @@ type ClaudeCliSession = {
   closed: boolean;
   // Tasks outlive inputs; false marks subagent work with no parent-stream query.
   taskOwners: Map<string, string | false>;
-  // Native tasks between their start and finish bookends, with the task that launched each.
-  runningTasks: Map<string, string | undefined>;
   // Native notification results identify task runs rather than task IDs.
   taskRuns: Map<string, string>;
+  // Running Agent/Workflow tasks and subagent-owned work, with their launching task.
+  runningDescendants: Map<string, string | undefined>;
 };
 const sessions = new WeakMap<CliBackendLiveSessionHandle, ClaudeCliSession>();
 
@@ -315,7 +319,10 @@ function closeSession(session: ClaudeCliSession, error?: unknown) {
 }
 
 function completeTurn(session: ClaudeCliSession, turn: ClaudeCliTurn) {
-  const holdsBackgroundTasks = turn.pendingBackgroundTaskIds.size > 0;
+  // Nested Agent and Workflow descendants can outlive their foreground parent without a
+  // parent-lane receipt. A warm process would lend them the next turn's tool and MCP authority.
+  const holdsBackgroundTasks =
+    turn.pendingBackgroundTaskIds.size > 0 || session.runningDescendants.size > 0;
   session.currentTurn = undefined;
   // Unfinished injected input would run as an orphan native turn; the host replays it instead.
   const orphanedInput = turn.injectedInputs.size > 0;
@@ -355,6 +362,7 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
   let taskId: string | undefined;
   let parentRuns = false;
   if (message.type === "system") {
+    parentRuns = recordRunningDescendants(session.runningDescendants, message);
     const input = turn && (!session.hasInputLifecycle || turn.inputStarted) ? turn : undefined;
     const inputUuid = input?.inputUuid ?? "";
     if (message.subtype === "background_tasks_changed") {
@@ -364,11 +372,17 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
             continue;
           }
           const id = recordTaskOwnership(session, task, inputUuid);
+          const parentTaskId = id ? session.runningDescendants.get(id) : undefined;
           if (
             id &&
             input &&
             !input.interrupted &&
             session.taskOwners.get(id) === input.inputUuid &&
+            // Only children of held background work extend the input; foreground
+            // descendants still retire with their parent turn.
+            (parentTaskId === undefined ||
+              input.pendingBackgroundTaskIds.has(parentTaskId) ||
+              input.pendingBackgroundTaskIds.has(id)) &&
             (task.task_type === "local_agent" ||
               task.task_type === "local_workflow" ||
               (task.task_type === "local_bash" && input.foregroundTaskIds.has(id)))
@@ -380,17 +394,6 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
       }
     } else {
       taskId = recordTaskOwnership(session, message, inputUuid);
-      if (typeof message.task_id === "string" && message.subtype === "task_started") {
-        session.runningTasks.set(
-          message.task_id,
-          typeof message.parent_task_id === "string" ? message.parent_task_id : undefined,
-        );
-      } else if (typeof message.task_id === "string" && message.subtype === "task_notification") {
-        const parentTaskId = session.runningTasks.get(message.task_id);
-        session.runningTasks.delete(message.task_id);
-        // Native routes a subagent's task notification to that subagent while it runs.
-        parentRuns = parentTaskId !== undefined && session.runningTasks.has(parentTaskId);
-      }
     }
   }
   if (!turn) {
@@ -566,8 +569,8 @@ function createSession(capability?: CliBackendLiveSessionCapability): ClaudeCliS
     hasInputLifecycle: false,
     closed: false,
     taskOwners: new Map(),
-    runningTasks: new Map(),
     taskRuns: new Map(),
+    runningDescendants: new Map(),
     handle: {
       generation: randomUUID(),
       fingerprint: capability?.fingerprint ?? randomUUID(),
